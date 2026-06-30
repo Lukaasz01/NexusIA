@@ -1,34 +1,43 @@
 import os
+import time
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 from rich.console import Console
 from rich.panel import Panel
 
-# Carrega a chave API que salvamos no arquivo .env
 load_dotenv()
-
-# Inicializa o terminal bonitão
 console = Console()
 
-# Inicializa o cliente oficial da IA do Google
 try:
     client = genai.Client()
+    
+    configuracao = types.GenerateContentConfig(
+        system_instruction="Você é a nexusIA, um assistente de terminal focado em tecnologia e programação. Seja direto, use respostas limpas e, quando enviar códigos, use formatação markdown adequada. Adote um tom amigável, porém focado em eficiência."
+    )
+    
+    chat = client.chats.create(
+        model='gemini-2.5-flash',
+        config=configuracao
+    )
+    
 except Exception as e:
-    console.print(f"[bold red]Erro ao iniciar o cliente da IA: {e}[/bold red]")
+    console.print(f"[bold red]Erro ao iniciar a IA: {e}[/bold red]")
 
-def chamar_ia(pergunta: str) -> str:
-    """Esta função envia a sua pergunta direto para o cérebro do Gemini."""
+def enviar_mensagem_chat(pergunta: str) -> str:
+    """Envia a pergunta tratando erros de cota (429) e outros problemas."""
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=pergunta,
-        )
+        response = chat.send_message(pergunta)
         return response.text
     except Exception as e:
-        return f"Erro ao nos comunicarmos com a IA: {e}"
+         erro_str = str(e)
+         # Verifica se o erro é de limite de requisições (Quota ou 429)
+         if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
+             return "[bold yellow]⚠️ Opa, fomos rápidos demais! Atingimos o limite temporário da API gratuita. Espere uns 30 segundos e tente me mandar outra mensagem.[/bold yellow]"
+         return f"Erro na comunicação: {erro_str}"
 
 def main():
-    console.print("[bold magenta]🚀 nexusIA Conectada ao Cérebro Real! Digite 'sair' para encerrar.[/bold magenta]")
+    console.print("[bold magenta]🚀 nexusIA v2.1 (Protegida contra Erro 429) Iniciada![/bold magenta]")
     console.print("----------------------------------------------------------------------")
 
     while True:
@@ -42,12 +51,10 @@ def main():
             if not user_input.strip():
                 continue
 
-            # Mostra a animação enquanto a IA gera a resposta na nuvem
-            with console.status("[bold cyan]Pensando...[/bold cyan]", spinner="dots"):
-                resposta = chamar_ia(user_input)
+            with console.status("[bold cyan] nexusIA pensando...[/bold cyan]", spinner="dots"):
+                resposta = enviar_mensagem_chat(user_input)
 
-            # Exibe a resposta real da IA na tela
-            console.print(Panel(resposta, title="nexusIA", border_style="blue", expand=False))
+            console.print(Panel(resposta, title="nexusIA", border_style="magenta", expand=False))
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Encerrando o programa...[/yellow]")
