@@ -33,7 +33,7 @@ def enviar_mensagem_chat(pergunta: str) -> str:
          erro_str = str(e)
          # Verifica se o erro é de limite de requisições (Quota ou 429)
          if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
-             return "[bold yellow]⚠️ Opa, fomos rápidos demais! Atingimos o limite temporário da API gratuita. Espere uns 30 segundos e tente me mandar outra mensagem.[/bold yellow]"
+             return "[bold yellow]⚠️ Opa, fomos rápidos demais! Atingimos o limite temporário da API. Espere uns 30 segundos e tente me mandar outra mensagem.[/bold yellow]"
          return f"Erro na comunicação: {erro_str}"
 
 def main():
