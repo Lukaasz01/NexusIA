@@ -9,7 +9,11 @@ console = Console()
 historico_conversa = [
     {
         "role": "system", 
-        "content": "Você é a nexusIA, um assistente de terminal rodando localmente por enquanto, Seja direto, não amigável mas eficiente."
+        "content": """Você é a nexusIA, um assistente de terminal focado em tecnologia que roda localmente.
+            Regras de comportamento:
+            - Seja amigável, porém extremamente direta e objetiva.
+            - Vá direto ao ponto, evitando introduções longas ou respostas prolixas.
+            - Entregue conclusões limpas, eficientes e códigos bem formatados."""
     }
 ]
 
@@ -39,25 +43,25 @@ def enviar_mensagem_local(pergunta: str) -> str:
         return f"Erro ao conectar com o Ollama local: {e}. Certifique-se de que o Ollama está aberto."
 
 def main():
-    console.print("[bold magenta]🚀 nexusIA v3.0 (CÉREBRO LOCAL - ILIMITADO) Iniciada![/bold magenta]")
-    console.print("----------------------------------------------------------------------")
+    console.print("[bold magenta]🚀 NexusIA v1.5 Iniciada![/bold magenta]")
+    console.print("[bold magenta]----------------------------------------------------------------------[/bold magenta]")
 
     while True:
         try:
-            user_input = console.input("\n[bold green]Você > [/bold green]")
+            user_input = console.input("\n[bold blue]Você > [/bold blue]")
 
-            if user_input.lower() in ['sair', 'exit', 'quit']:
-                console.print("[yellow]Até a próxima![/yellow]")
+            if user_input.lower() in ['/sair', '/exit', '/quit']:
+                console.print("Até a próxima!")
                 break
 
             if not user_input.strip():
                 continue
 
             # Animação de carregamento
-            with console.status("[bold cyan]nexusIA pensando localmente...[/bold cyan]", spinner="dots"):
+            with console.status("[bold cyan]Pensando...[/bold cyan]", spinner="dots"):
                 resposta = enviar_mensagem_local(user_input)
 
-            console.print(Panel(resposta, title="nexusIA (Local)", border_style="cyan", expand=False))
+            console.print(Panel(resposta, title="NexusIA", border_style="cyan", expand=False))
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Encerrando o programa...[/yellow]")
