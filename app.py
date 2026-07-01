@@ -11,18 +11,17 @@ MODELO_IA = 'qwen2.5-coder:7b'
 DB_NAME = "nexus_memory.db"
 
 # =====================================================================
-# BANCO DE DADOS (SQLite)
+# BANCO DE DADOS ATUALIZADO (Salvamento em JSON completo)
 # =====================================================================
 
 def init_db():
+    """Cria a tabela usando uma única coluna de texto para o JSON completo da mensagem."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role TEXT,
-            content TEXT,
-            tool_calls TEXT,
+            msg_json TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -38,15 +37,36 @@ def iniciar_historico_sistema():
             "- Seja amigável, porém extremamente direta, curta e objetiva.\n"
             "- Responda em português normal para saudações e perguntas gerais.\n"
             "- Quando quiser ATIVAR uma ferramenta, retorne APENAS o JSON dela, sem textos explicativos.\n"
-            "- APÓS a ferramenta ser executada (quando você receber o resultado da 'tool'), mude o modo: "
-            "fale normalmente com o usuário em português explicando o resultado. PROIBIDO gerar JSON após a função já ter sido resolvida."
+            "- APÓS a ferramenta ser executada (quando receber o role 'tool'), fale normalmente em português explicando o resultado."
         )
     }
+
+def garantir_dicionario_puro(msg) -> dict:
+    """Converte o objeto customizado do Ollama em um dicionário Python padrão sem perder campos."""
+    if isinstance(msg, dict):
+        return msg
+    
+    dados = {
+        "role": str(msg.role),
+        "content": str(msg.content or "")
+    }
+    # PRESERVAÇÃO CRUCIAL: Salva o nome da ferramenta se for o caso
+    if hasattr(msg, 'name') and msg.name:
+        dados["name"] = str(msg.name)
+        
+    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+        dados["tool_calls"] = []
+        for call in msg.tool_calls:
+            name = getattr(call.function, 'name', call.get('function', {}).get('name'))
+            args = getattr(call.function, 'arguments', call.get('function', {}).get('arguments'))
+            dados["tool_calls"].append({"function": {"name": name, "arguments": args}})
+            
+    return dados
 
 def carregar_historico_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT role, content, tool_calls FROM historico ORDER BY id ASC")
+    cursor.execute("SELECT msg_json FROM historico ORDER BY id ASC")
     rows = cursor.fetchall()
     conn.close()
     
@@ -55,37 +75,19 @@ def carregar_historico_db():
         salvar_mensagem_db(msg_sistema)
         return [msg_sistema]
     
-    historico = []
-    for role, content, tool_calls in rows:
-        msg = {"role": role, "content": content}
-        if tool_calls:
-            msg["tool_calls"] = json.loads(tool_calls)
-        historico.append(msg)
-    return historico
+    return [json.loads(row[0]) for row in rows]
 
 def salvar_mensagem_db(msg):
-    role = getattr(msg, 'role', msg.get('role'))
-    content = getattr(msg, 'content', msg.get('content')) or ""
-    
-    tool_calls = None
-    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-        tool_calls = []
-        for call in msg.tool_calls:
-            name = getattr(call.function, 'name', call.get('function', {}).get('name'))
-            args = getattr(call.function, 'arguments', call.get('function', {}).get('arguments'))
-            tool_calls.append({"function": {"name": name, "arguments": args}})
-    elif isinstance(msg, dict) and 'tool_calls' in msg:
-        tool_calls = msg['tool_calls']
-        
+    """Salva a estrutura INTEIRA da mensagem em JSON para não perder nenhum metadado."""
+    msg_pura = garantir_dicionario_puro(msg)
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    tc_json = json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
-    cursor.execute("INSERT INTO historico (role, content, tool_calls) VALUES (?, ?, ?)", (role, content, tc_json))
+    cursor.execute("INSERT INTO historico (msg_json) VALUES (?)", (json.dumps(msg_pura, ensure_ascii=False),))
     conn.commit()
     conn.close()
 
 # =====================================================================
-# AUTO-COMPRESSÃO DE MEMÓRIA
+# AUTO-COMPRESSÃO DE MEMÓRIA (Corrigida)
 # =====================================================================
 
 def verificar_e_resumir_historico():
@@ -94,20 +96,21 @@ def verificar_e_resumir_historico():
     cursor.execute("SELECT COUNT(*) FROM historico")
     total = cursor.fetchone()[0]
     
-    if total > 20:
+    if total > 25:
         console.print("[bold yellow]🧠 Otimizando Banco SQLite: Compactando histórico para poupar memória...[/bold yellow]")
-        cursor.execute("SELECT role, content FROM historico ORDER BY id ASC")
+        cursor.execute("SELECT msg_json FROM historico ORDER BY id ASC")
         rows = cursor.fetchall()
         
         conversa_texto = ""
-        for role, content in rows:
-            if role in ['user', 'assistant']:
-                autor = "Lucas" if role == 'user' else "nexusIA"
-                conversa_texto += f"{autor}: {content}\n"
+        for row in rows:
+            msg = json.loads(row[0])
+            if msg['role'] in ['user', 'assistant']:
+                autor = "Lucas" if msg['role'] == 'user' else "nexusIA"
+                conversa_texto += f"{autor}: {msg['content']}\n"
         
         prompt_resumo = (
             f"Resuma a seguinte conversa em exatamente 3 parágrafos técnicos.\n"
-            f"Mantenha fatos como o nome do usuário (Lucas) e o projeto (nexusIA):\n\n{conversa_texto}"
+            f"Mantenha expressamente o nome do usuário (Lucas) e o projeto (nexusIA):\n\n{conversa_texto}"
         )
         
         try:
@@ -115,10 +118,14 @@ def verificar_e_resumir_historico():
             resumo_texto = resposta_resumo['message'].content
             
             cursor.execute("DELETE FROM historico")
-            cursor.execute("INSERT INTO historico (role, content) VALUES (?, ?)", (
-                "system", 
-                f"Você é a nexusIA. Contexto resumido das conversas anteriores com Lucas:\n{resumo_texto}"
-            ))
+            conn.commit()
+            
+            cursor.execute("INSERT INTO historico (msg_json) VALUES (?)", (json.dumps(iniciar_historico_sistema(), ensure_ascii=False),))
+            msg_resumo = {
+                "role": "system",
+                "content": f"Contexto importante das conversas anteriores com Lucas:\n{resumo_texto}"
+            }
+            cursor.execute("INSERT INTO historico (msg_json) VALUES (?)", (json.dumps(msg_resumo, ensure_ascii=False),))
             conn.commit()
             console.print("[bold green]✅ Banco de dados compactado com sucesso![/bold green]")
         except Exception as e:
@@ -168,7 +175,7 @@ ferramentas_disponiveis = [
 ]
 
 # =====================================================================
-# FLUXO EXECUTÁVEL PRINCIPAL
+# FLUXO EXECUTÁVEL
 # =====================================================================
 
 init_db()
@@ -201,7 +208,7 @@ def enviar_mensagem_local(pergunta: str) -> str:
 
         if tool_calls:
             salvar_mensagem_db(response['message'])
-            historico_conversa.append(response['message'])
+            historico_conversa.append(garantir_dicionario_puro(response['message']))
             
             for call in tool_calls:
                 if hasattr(call, 'function'):
@@ -246,7 +253,7 @@ def enviar_mensagem_local(pergunta: str) -> str:
         return f"Erro no motor da IA: {e}"
 
 def main():
-    console.print("[bold magenta]🚀 nexusIA v7.3 (Instruções Refinadas) Inicializada![/bold magenta]")
+    console.print("[bold magenta]🚀 nexusIA v7.4 (Memória em JSON Puro) Inicializada![/bold magenta]")
     console.print("----------------------------------------------------------------------")
 
     while True:
@@ -269,7 +276,7 @@ def main():
                 console.print("[bold yellow]🧹 Banco de dados SQLite limpo do zero![/bold yellow]")
                 continue
 
-            with console.status("[bold cyan]nexusIA processando...[/bold cyan]", spinner="dots"):
+            with console.status("[bold cyan]NexusIA processando...[/bold cyan]", spinner="dots"):
                 resposta = enviar_mensagem_local(user_input)
 
             console.print(Panel(resposta, title="nexusIA (Agente SQL)", border_style="cyan", expand=False))
