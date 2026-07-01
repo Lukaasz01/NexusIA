@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
-MODELO_IA = 'qwen2.5-coder:3b'
+MODELO_IA = 'qwen2.5-coder:7b'
 DB_NAME = "nexus_memory.db"
 
 # =====================================================================
@@ -34,9 +34,12 @@ def iniciar_historico_sistema():
         "role": "system", 
         "content": (
             "Você é a nexusIA, um assistente de terminal focado em tecnologia.\n"
-            "Regras:\n"
+            "Regras de Ouro:\n"
             "- Seja amigável, porém extremamente direta, curta e objetiva.\n"
-            "- Se decidir usar uma ferramenta, responda APENAS com o JSON da função, sem textos extras."
+            "- Responda em português normal para saudações e perguntas gerais.\n"
+            "- Quando quiser ATIVAR uma ferramenta, retorne APENAS o JSON dela, sem textos explicativos.\n"
+            "- APÓS a ferramenta ser executada (quando você receber o resultado da 'tool'), mude o modo: "
+            "fale normalmente com o usuário em português explicando o resultado. PROIBIDO gerar JSON após a função já ter sido resolvida."
         )
     }
 
@@ -82,7 +85,7 @@ def salvar_mensagem_db(msg):
     conn.close()
 
 # =====================================================================
-# AUTO-COMPRESSÃO DE MEMÓRIA (SQLite)
+# AUTO-COMPRESSÃO DE MEMÓRIA
 # =====================================================================
 
 def verificar_e_resumir_historico():
@@ -108,10 +111,7 @@ def verificar_e_resumir_historico():
         )
         
         try:
-            resposta_resumo = ollama.chat(
-                model=MODELO_IA,
-                messages=[{"role": "user", "content": prompt_resumo}]
-            )
+            resposta_resumo = ollama.chat(model=MODELO_IA, messages=[{"role": "user", "content": prompt_resumo}])
             resumo_texto = resposta_resumo['message'].content
             
             cursor.execute("DELETE FROM historico")
@@ -120,7 +120,7 @@ def verificar_e_resumir_historico():
                 f"Você é a nexusIA. Contexto resumido das conversas anteriores com Lucas:\n{resumo_texto}"
             ))
             conn.commit()
-            console.print("[bold green]✅ Banco de dados compactado e indexado com sucesso![/bold green]")
+            console.print("[bold green]✅ Banco de dados compactado com sucesso![/bold green]")
         except Exception as e:
             console.print(f"[bold red]Falha no auto-resumo: {e}[/bold red]")
             
@@ -190,8 +190,8 @@ def enviar_mensagem_local(pergunta: str) -> str:
         conteudo_resposta = response['message'].get('content', '') or ""
         tool_calls = response['message'].get('tool_calls', [])
 
-        # 🔥 BLINDAGEM: Se o Ollama não capturou a ferramenta nativamente, nós extraímos do texto
-        if not tool_calls and '{"name":' in conteudo_resposta:
+        texto_compacto = conteudo_resposta.replace(" ", "").replace("\n", "").replace("\r", "").replace("```json", "").replace("```", "")
+        if not tool_calls and '"name":' in texto_compacto:
             try:
                 json_limpo = conteudo_resposta.replace("```json", "").replace("```", "").strip()
                 dados_funcao = json.loads(json_limpo)
@@ -204,20 +204,24 @@ def enviar_mensagem_local(pergunta: str) -> str:
             historico_conversa.append(response['message'])
             
             for call in tool_calls:
-                # Trata dinamicamente se veio como Objeto do Ollama ou Dicionário do nosso interceptador
-                if hasattr(call, 'function') or (isinstance(call, dict) and 'function' in call and not isinstance(call['function'], dict)):
+                if hasattr(call, 'function'):
                     nome_funcao = call.function.name
                     argumentos = call.function.arguments
+                elif isinstance(call, dict):
+                    func_data = call.get("function", call)
+                    nome_funcao = func_data.get("name")
+                    argumentos = func_data.get("arguments", {})
+                    if isinstance(argumentos, str):
+                        try: argumentos = json.loads(argumentos)
+                        except: pass
                 else:
-                    nome_funcao = call.get('function', {}).get('name')
-                    argumentos = call.get('function', {}).get('arguments', {})
+                    continue
                 
                 console.print(f"[bold yellow]⚙️ [Python + SQLite] Executando ação: {nome_funcao}()...[/bold yellow]")
                 
                 if nome_funcao == 'obter_data_hora':
                     resultado = obter_data_hora()
                 elif nome_funcao == 'criar_arquivo':
-                    # Evita o erro de dicionários aninhados que o Llama/Qwen pequenos geram
                     txt_conteudo = argumentos.get('conteudo', '')
                     if isinstance(txt_conteudo, dict):
                         txt_conteudo = txt_conteudo.get('description', str(txt_conteudo))
@@ -242,7 +246,7 @@ def enviar_mensagem_local(pergunta: str) -> str:
         return f"Erro no motor da IA: {e}"
 
 def main():
-    console.print("[bold magenta]🚀 nexusIA v7.1 (Blindagem de Ferramentas SQL) Inicializada![/bold magenta]")
+    console.print("[bold magenta]🚀 nexusIA v7.3 (Instruções Refinadas) Inicializada![/bold magenta]")
     console.print("----------------------------------------------------------------------")
 
     while True:
